@@ -14,6 +14,7 @@ If you used this tool in your work consider to cite us in [2]
 ## How to use
 All the required functions are contained in the module NeuralField.jl. An exemple of a large neural field with step by stepe guidance can be found in Example.jl 
 
+<img src="SNNvsSFP2.gif" width="40" height="40" />
 
 
 ## References
