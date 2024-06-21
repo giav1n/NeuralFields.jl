@@ -16,6 +16,10 @@ All the required functions are contained in the module NeuralField.jl. An exempl
 
 <img src="SNNvsSFP2.gif" width="600" height="300" />
 
+## Sleep-Awake transittion
+As a use-case we implement a neural field that shows slow wawes alike those observed during sleep. By modulating in time the strenght of the adptation we induce a transition to an high firing rate states that mimcs the awake state
+<img src="AwakeTransit.png" />
+
 
 ## References
 
