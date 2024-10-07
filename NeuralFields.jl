@@ -320,7 +320,7 @@ pop: is the single population struc. of parameters
 S: state vector where the evolution is stored
 FS: Bolean if true implements finite-size fluctuations
 """
-function IntegrateFP!(pop::SinglePopulation,μ::Float64, σ2::Float64,S::Vector{Float64},FS=true)
+function IntegrateFP!(pop::SinglePopulation,μ::Float64, σ2::Float64,S::Vector{Float64},FS::Bool)
 
     #Unpack the state
     NV=pop.NV
@@ -347,7 +347,7 @@ function IntegrateFP!(pop::SinglePopulation,μ::Float64, σ2::Float64,S::Vector{
     #Update Adt bandend matrix
     Diagonals!(Adt,pop.NV,v,D,pop.dV,pop.dt)
     #Reinjecton of flux in H:
-    p[pop.ib] += νH[1]*(pop.dt/pop.dV)
+    p[pop.ib] += νH[end-pop.nref]*(pop.dt/pop.dV)
     Adt *= -1
     Adt[2,:] += ones(pop.NV)
 
