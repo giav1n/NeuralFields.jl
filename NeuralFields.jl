@@ -2,7 +2,7 @@ module NeuralFields
 
 ### Gianni Valerio Vinci 2024
 using LinearAlgebra,HDF5,SparseArrays,PoissonRandom,DelimitedFiles,QuadGK,SpecialFunctions
-
+BLAS.set_num_threads(1)
 """ 
 Load Network parameters from a properly formatted h5 file
 """
@@ -35,6 +35,43 @@ function LoadNet(fname)
 end
 
 
+
+function ExponentialAdiacencyMatrix(Ns, λ)
+    # Number of total sites
+    Npop = Ns^2
+
+    # Create an empty adjacency matrix
+    A = Matrix{Float64}(I, Npop, Npop)  # Start with an identity matrix
+
+    # Convert linear indices to 2D coordinates (row, column)
+    function index_to_coordinates(idx, Ns)
+        row = div(idx - 1, Ns) + 1
+        col = rem(idx - 1, Ns) + 1
+        return row, col
+    end
+
+    # Compute the distance between two points
+    function distance(i, j, Ns)
+        row_i, col_i = index_to_coordinates(i, Ns)
+        row_j, col_j = index_to_coordinates(j, Ns)
+        return sqrt((row_i - row_j)^2 + (col_i - col_j)^2)
+    end
+
+    # Fill the adjacency matrix with exponential decay weights
+    for i in 1:Npop
+        for j in i+1:Npop
+            dist = distance(i, j, Ns)
+            weight = exp(-dist / λ)
+            A[i, j] = weight
+            A[j, i] = weight  # Symmetric matrix
+        end
+    end
+
+    return A
+end
+
+
+
 """
 Initilize Fokker-Planck network from PERSEO initialization files
 
@@ -46,7 +83,7 @@ dt: time step
 k : scales the number of neurosn in the nodes.
 """
 
-function InitializeFPfromPerseusNet(modulesfile,connectfile,NV,dt,α,k=1) 
+function InitializeFPfromPerseusNet(modulesfile,connectfile,NV,dt,α,k) 
     d=readdlm(modulesfile)
     N=Int.(d[:,1])
     τm=d[:,6]/1000 # [s]
@@ -97,10 +134,10 @@ function InitializeFPfromPerseusNet(modulesfile,connectfile,NV,dt,α,k=1)
     A=sparse(A)
     B=sparse(B)
     cm=[DefineSinglePopulation(Dict("Vm"=> -α*θ[1],"θ"=>θ[1],"H"=>H[1],"NV"=>NV,
-                                "dt"=>dt,"τ"=>τm[1],"τ0"=>τ0[1],"τD"=>τD[1,1],"τC"=>τc[1],"δ"=>δm[1],"g"=>g[1],"N"=>k*N[1]))];
+                                "dt"=>dt,"τ"=>τm[1],"τ0"=>τ0[1],"τD"=>τD[1,1],"τC"=>τc[1],"δ"=>δm[1],"g"=>g[1],"N"=>Int(round(k*N[1]))))];
     for n=2:Npop
         push!(cm,DefineSinglePopulation(Dict("Vm"=> -α*θ[n],"θ"=>θ[n],"H"=>H[n],"NV"=>NV,
-                                        "dt"=>dt,"τ"=>τm[n],"τ0"=>τ0[n],"τD"=>τD[n,n],"τC"=>τc[n],"δ"=>δm[n,n],"g"=>g[n],"N"=>k*N[n])))
+                                        "dt"=>dt,"τ"=>τm[n],"τ0"=>τ0[n],"τD"=>τD[n,n],"τC"=>τc[n],"δ"=>δm[n,n],"g"=>g[n],"N"=>Int(round(k*N[n])))))
     end
 
     S=Vector{Float64}[]
@@ -109,6 +146,65 @@ function InitializeFPfromPerseusNet(modulesfile,connectfile,NV,dt,α,k=1)
     end
     return cm,S,μx,σ2x,g,Npop,A,B
 end
+
+function LoadConnectivity(modulesfile,connectfile)
+    d=readdlm(modulesfile)
+    N=Int.(d[:,1])
+    d=readdlm(connectfile)
+    Npop=size(N,1)
+    c=zeros(Npop,Npop)
+    J=zeros(Npop,Npop)
+
+    PostSyn=Int.(d[:,1].+1)
+    PretSyn=Int.(d[:,2].+1)
+
+    for i=1:length(PostSyn)
+        c[PostSyn[i],PretSyn[i]]=d[i,3]
+        J[PostSyn[i],PretSyn[i]]=d[i,7]
+    end
+
+    K=zeros(Npop,Npop)
+    for i=1:Npop 
+        for j=1:Npop 
+            K[i,j]=c[i,j]*N[j]
+        end
+    end
+    
+    return K,J
+end
+
+
+function BuildTile(gt,ϵ,N,λ,γ,L,NV,dt,α)
+    #Cortical columns params
+    Scale=N/6300
+    cm,S,μx,σ2x,g,Npop,KJ,KJ2=InitializeFPfromPerseusNet("mod.ini","con.ini",NV,dt,α,Scale);
+    g[1]=gt
+    g[2]=0.0
+    μx[1]=μx[1]*ϵ
+    σ2x[1]=σ2x[1]*(ϵ^2)
+    Jcc=KJ2[1,1]/KJ[1,1]
+    Kcc=KJ[1,1]/Jcc
+    
+    Npop=L^2
+    #Initialize State:
+    SE=Vector{Float64}[]
+    SI=Vector{Float64}[]
+
+    for n=1:Npop
+        SE=push!(SE,copy(S[1]))
+        SI=push!(SI,copy(S[2]))
+    end
+
+    K=ExponentialAdiacencyMatrix(L, λ)
+    K[findall(x-> x<0.05,K)].=0 # Pruning
+    K[diagind(K)].=0
+    K=K.*Kcc
+    
+    KJF=sparse(K.*(Jcc*γ))
+    KJ2F=sparse(K.*((Jcc*γ).^2))
+    return cm,SE,SI,μx,σ2x,g,Npop,KJ,KJ2,KJF,KJ2F
+end
+
 
 const sqπ=sqrt(π)
 const tol=1e-8;
@@ -237,7 +333,7 @@ function DefineSinglePopulation(p)
 end
 
 """
-Initialize a vector that will contain all the mutable variable of the single nodes
+Initialize a vector that will contain all the state variable of the single nodes
 """
 function InitializeState(cm)
     S=zeros(cm.NV +3 +max(cm.nref,cm.nδ))
@@ -313,7 +409,7 @@ function Diagonals!(mat,N,v,D,dV,dt)
 end;
 
 """
-1 step integratio of the single node Fokker-Planck
+1 step integration of the single node Fokker-Planck
 pop: is the single population struc. of parameters
 μ: mean of the total synaptic current of the node
 σ2: variance of the total synaptic current of the node
@@ -347,7 +443,7 @@ function IntegrateFP!(pop::SinglePopulation,μ::Float64, σ2::Float64,S::Vector{
     #Update Adt bandend matrix
     Diagonals!(Adt,pop.NV,v,D,pop.dV,pop.dt)
     #Reinjecton of flux in H:
-    p[pop.ib] += νH[end-pop.nref]*(pop.dt/pop.dV)
+    p[pop.ib] += νH[end-pop.nref+1]*(pop.dt/pop.dV)  # reinjection of ν(t-τ₀)
     Adt *= -1
     Adt[2,:] += ones(pop.NV)
 

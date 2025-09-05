@@ -4,13 +4,13 @@ include("NeuralFields.jl")
 NV=200 # Number of grid ponints 
 α=0.5  # Vmin=-α*θ
 dt=0.001 #[s]
-cm,S,μx,σ2x,g,Npop,KJ,KJ2=NeuralFields.InitializeFPfromPerseusNet("m_cortsurf.ini","c_cortsurf.ini",NV,dt,α);
+cm,S,μx,σ2x,g,Npop,KJ,KJ2=NeuralFields.InitializeFPfromPerseusNet("m_cortsurf.ini","c_cortsurf.ini",NV,dt,α,1);
 
 ##
 Life=10 #[s]
 steps=Int(round(Life/dt))
 ν,νt,c=zeros(Npop,steps),zeros(Npop),zeros(Npop)
-
+FiniteSize=true
 @showprogress for n=2:steps
     # Compute the recurrent contribution
     μ= KJ*νt + μx -g.*c  # Mean of synaptic currents
@@ -18,7 +18,7 @@ steps=Int(round(Life/dt))
     # c is the adaptation variable dc/dt =-c(t)/τC +ν(t)
 
     Threads.@threads for i=1:Npop
-        NeuralFields.IntegrateFP!(cm[i],μ[i], σ2[i],S[i])
+        NeuralFields.IntegrateFP!(cm[i],μ[i], σ2[i],S[i],FiniteSize)
         ν[i,n],νt[i],c[i]=S[i][cm[i].NV+1:cm[i].NV+3]
    end
    
